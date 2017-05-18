@@ -630,4 +630,121 @@ describe('Subscribe', () => {
       );
     }).to.throw('test error');
   });
+
+  it('should handle error during execuction of source event', async () => {
+    const erroringEmailSchema = new GraphQLSchema({
+      query: QueryType,
+      subscription: new GraphQLObjectType({
+        name: 'Subscription',
+        fields: {
+          importantEmail: {
+            type: GraphQLString,
+            resolve(event) {
+              if (event === 'Goodbye') {
+                throw new Error('Never leave.');
+              }
+              return event;
+            },
+            subscribe: async function* importantEmail() {
+              yield 'Hello';
+              yield 'Goodbye';
+            },
+          },
+        },
+      })
+    });
+
+    const subscription = subscribe(
+      erroringEmailSchema,
+      parse(`
+        subscription {
+          importantEmail
+        }
+      `)
+    );
+
+    const payload1 = await subscription.next();
+    expect(payload1).to.jsonEqual({
+      done: false,
+      value: {
+        data: {
+          importantEmail: 'Hello'
+        }
+      }
+    });
+
+    const payload2 = await subscription.next();
+    expect(payload2).to.jsonEqual({
+      done: false,
+      value: {
+        errors: [
+          {
+            message: 'Never leave.',
+            locations: [ { line: 3, column: 11 } ],
+            path: [ 'importantEmail' ],
+          }
+        ],
+        data: {
+          importantEmail: null,
+        }
+      }
+    });
+  });
+
+  // Note: currently failing
+  it('should handle error thrown within source event stream', async () => {
+    const erroringEmailSchema = new GraphQLSchema({
+      query: QueryType,
+      subscription: new GraphQLObjectType({
+        name: 'Subscription',
+        fields: {
+          importantEmail: {
+            type: GraphQLString,
+            resolve(event) {
+              return event;
+            },
+            subscribe: async function* importantEmail() {
+              yield 'Hello';
+              throw new Error('test error');
+            },
+          },
+        },
+      })
+    });
+
+    const subscription = subscribe(
+      erroringEmailSchema,
+      parse(`
+        subscription {
+          importantEmail
+        }
+      `)
+    );
+
+    const payload1 = await subscription.next();
+    expect(payload1).to.jsonEqual({
+      done: false,
+      value: {
+        data: {
+          importantEmail: 'Hello'
+        }
+      }
+    });
+
+    const payload2 = await subscription.next();
+    expect(payload2).to.jsonEqual({
+      done: false,
+      value: {
+        errors: [
+          {
+            message: 'test error',
+            locations: [ { line: 3, column: 11 } ],
+            path: [ 'importantEmail' ],
+          }
+        ]
+        // Should data be set here if the root field is a nullable type?
+      }
+    });
+
+  });
 });
